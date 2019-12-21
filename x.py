@@ -194,7 +194,7 @@ class Classifier(nn.Sequential):
         )
 
 
-def train_on_batch(clf, clf_optimizer, x, y_true):
+def baseline_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true):
     clf.train()
     clf.zero_grad()
     y_pred = clf(x)
@@ -204,10 +204,31 @@ def train_on_batch(clf, clf_optimizer, x, y_true):
     return (y_pred.max(1)[1] == y_true).sum().item()
 
 
-def validate_on_batch(clf, x, y_true):
+def baseline_validate_on_batch(clf, x, y_true):
     clf.eval()
     y_pred = clf(x)
     return (y_pred.max(1)[1] == y_true).sum().item()
+
+
+def gtn_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true):
+    clf.train()
+    # TODO
+
+
+def gtn_validate_on_batch(clf, x, y_true):
+    clf.eval()
+    y_pred = clf(x)
+    return (y_pred.max(1)[1] == y_true).sum().item()
+
+
+def get_model(model_type):
+    return model2tv[model_type]
+
+
+model2tv = {
+    'baseline': (baseline_train_on_batch, baseline_validate_on_batch),
+    'gtn': (gtn_train_on_batch, gtn_validate_on_batch),
+}
 
 
 def main(args):
@@ -221,6 +242,7 @@ def main(args):
     clf = Classifier(args.clf_dim, num_classes)
     clf.to(device)
     clf_optimizer = Adam(clf.parameters())
+    train_on_batch, validate_on_batch = get_model(args.exp)
     for epoch in range(args.epochs):
         t_ok = 0
         t_all = 0
@@ -228,7 +250,8 @@ def main(args):
         v_all = 0
         for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm, device):
             if is_train:
-                t_ok += train_on_batch(clf, clf_optimizer, x, y_true)
+                t_ok += train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x,
+                                       y_true)
                 t_all += x.shape[0]
             else:
                 v_ok += validate_on_batch(clf, x, y_true)
