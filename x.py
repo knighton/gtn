@@ -3,6 +3,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 from torchvision import transforms as tf
+from tqdm import tqdm
 
 
 def parse_args():
@@ -10,6 +11,7 @@ def parse_args():
     x.add_argument('--dataset', type=str, default='cifar10@data/')
     x.add_argument('--dl_workers', type=int, default=8)
     x.add_argument('--batch_size', type=int, default=256)
+    x.add_argument('--tqdm', type=int, default=1)
     return x.parse_args()
 
 
@@ -46,11 +48,13 @@ def each_split_batch(loader):
         yield x
 
 
-def each_batch(t_loader, v_loader):
+def each_batch(t_loader, v_loader, use_tqdm):
     splits = [1] * len(t_loader) + [0] * len(v_loader)
     np.random.shuffle(splits)
     t = each_split_batch(t_loader)
     v = each_split_batch(v_loader)
+    if use_tqdm:
+        splits = tqdm(splits)
     for is_train in splits:
         if is_train:
             each = t
@@ -64,8 +68,8 @@ def main(args):
     dataset_type, dataset_dir = args.dataset.split('@')
     t_loader, v_loader = load_dataset(dataset_type, dataset_dir, args.batch_size,
                                       args.dl_workers)
-    for is_train, x, y_true in each_batch(t_loader, v_loader):
-        print(is_train, x.shape, y_true.shape)
+    for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm):
+        pass
 
 
 if __name__ == '__main__':
