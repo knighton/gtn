@@ -16,6 +16,10 @@ def parse_args():
     x.add_argument('--epochs', type=int, default=100)
     x.add_argument('--batch_size', type=int, default=256)
     x.add_argument('--tqdm', type=int, default=1)
+    x.add_argument('--noise_dim', type=int, default=128)
+    x.add_argument('--class_embed_dim', type=int, default=128)
+    x.add_argument('--head_dim', type=int, default=128)
+    x.add_argument('--clf_dim', type=int, default=128)
     return x.parse_args()
 
 
@@ -80,7 +84,7 @@ class Reshape(nn.Module):
         return x.view(*shape)
 
 
-class Flatten(nn.Module):
+class Flatten(Reshape):
     def __init__(self):
         super().__init__(-1)
 
@@ -180,7 +184,7 @@ class Classifier(nn.Sequential):
             Flatten(),
             nn.Dropout(),
             nn.Linear(k * 4, k * 4),
-            nn.BatchNorm1(k * 4),
+            nn.BatchNorm1d(k * 4),
             nn.ReLU(),
             nn.Dropout(),
             nn.Linear(k * 4, num_classes),
@@ -192,6 +196,10 @@ def main(args):
     dataset_type, dataset_dir = args.dataset.split('@')
     t_loader, v_loader, num_classes = load_dataset(
         dataset_type, dataset_dir, args.batch_size, args.dl_workers)
+    gen = Generator(args.noise_dim, num_classes, args.class_embed_dim, args.head_dim)
+    gen.to(device)
+    clf = Classifier(args.clf_dim, num_classes)
+    clf.to(device)
     for epoch in range(args.epochs):
         for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm, device):
             pass
