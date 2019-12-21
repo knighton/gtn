@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 from torchvision import transforms as tf
@@ -36,7 +37,7 @@ def load_cifar10(dir_name, batch_size, num_workers):
                           transform=val_transform)
     val_loader = DataLoader(val_dataset, batch_size=batch_size,
                             shuffle=True, num_workers=num_workers)
-    return train_loader, val_loader
+    return train_loader, val_loader, 10
 
 
 def load_dataset(dataset_type, dataset_dir, batch_size, num_workers):
@@ -69,11 +70,128 @@ def each_batch(t_loader, v_loader, use_tqdm, device):
         yield is_train, x, y_true
 
 
+class Reshape(nn.Module):
+    def __init__(self, *shape):
+        super().__init__()
+        self.shape = shape
+
+    def forward(self, x):
+        shape = (x.shape[0],) + self.shape
+        return x.view(*shape)
+
+
+class Flatten(nn.Module):
+    def __init__(self):
+        super().__init__(-1)
+
+
+class Upsample2d(nn.Module):
+    def __init__(self, mul):
+        super().__init__()
+        self.mul = mul
+
+    def forward(self, x):
+        return F.upsample_bilinear(x, self.mul)
+
+
+class Generator(nn.Module):
+    def __init__(self, noise_dim, num_classes, class_embed_dim, head_dim):
+        super().__init__()
+
+        k = head_dim * 2
+
+        self.noise_head = nn.Sequential(
+            nn.Linear(noise_dim, k),
+            nn.BatchNorm1d(k),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(k, k),
+        )
+
+        self.class_head = nn.Sequential(
+            nn.Embedding(num_classes, class_embed_dim),
+            Flatten(),
+            nn.Linear(class_embed_dim, k),
+            nn.BatchNorm1d(k),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(k, k),
+        )
+
+        self.trunk = nn.Sequential(
+            nn.Linear(k * 2, k * 2),
+            nn.BatchNorm1d(k * 2),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(k * 2, k * 2),
+            Reshape(k, 2, 2),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            Upsample2d(2),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            Upsample2d(2),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            Upsample2d(2),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            Upsample2d(2),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, 3, 3, 1, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, noise, classes):
+        noise = self.noise_head(noise)
+        classes = self.class_head(classes)
+        x = torch.cat([noise, classes], 1)
+        return self.trunk(x)
+
+
+class Classifier(nn.Sequential):
+    def __init__(self, dim, num_classes):
+        k = dim
+        super().__init__(
+            nn.Conv2d(3, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, k, 3, 1, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, k, 3, 2, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, k, 3, 2, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, k, 3, 2, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            nn.Conv2d(k, k, 3, 2, 1),
+            nn.BatchNorm2d(k),
+            nn.ReLU(),
+            Flatten(),
+            nn.Dropout(),
+            nn.Linear(k * 4, k * 4),
+            nn.BatchNorm1(k * 4),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(k * 4, num_classes),
+        )
+
+
 def main(args):
     device = torch.device(args.device)
     dataset_type, dataset_dir = args.dataset.split('@')
-    t_loader, v_loader = load_dataset(dataset_type, dataset_dir, args.batch_size,
-                                      args.dl_workers)
+    t_loader, v_loader, num_classes = load_dataset(
+        dataset_type, dataset_dir, args.batch_size, args.dl_workers)
     for epoch in range(args.epochs):
         for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm, device):
             pass
