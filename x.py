@@ -2,6 +2,8 @@ from argparse import ArgumentParser
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
+from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 from torchvision import transforms as tf
@@ -10,6 +12,7 @@ from tqdm import tqdm
 
 def parse_args():
     x = ArgumentParser()
+    x.add_argument('--exp', type=str, default='baseline')
     x.add_argument('--device', type=str, default='cuda:0')
     x.add_argument('--dataset', type=str, default='cifar10@data/')
     x.add_argument('--dl_workers', type=int, default=8)
@@ -191,6 +194,22 @@ class Classifier(nn.Sequential):
         )
 
 
+def train_on_batch(clf, clf_optimizer, x, y_true):
+    clf.train()
+    clf.zero_grad()
+    y_pred = clf(x)
+    loss = F.cross_entropy(y_pred, y_true)
+    loss.backward()
+    clf_optimizer.step()
+    return (y_pred.max(1)[1] == y_true).sum().item()
+
+
+def validate_on_batch(clf, x, y_true):
+    clf.eval()
+    y_pred = clf(x)
+    return (y_pred.max(1)[1] == y_true).sum().item()
+
+
 def main(args):
     device = torch.device(args.device)
     dataset_type, dataset_dir = args.dataset.split('@')
@@ -198,11 +217,25 @@ def main(args):
         dataset_type, dataset_dir, args.batch_size, args.dl_workers)
     gen = Generator(args.noise_dim, num_classes, args.class_embed_dim, args.head_dim)
     gen.to(device)
+    gen_optimizer = Adam(gen.parameters())
     clf = Classifier(args.clf_dim, num_classes)
     clf.to(device)
+    clf_optimizer = Adam(clf.parameters())
     for epoch in range(args.epochs):
+        t_ok = 0
+        t_all = 0
+        v_ok = 0
+        v_all = 0
         for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm, device):
-            pass
+            if is_train:
+                t_ok += train_on_batch(clf, clf_optimizer, x, y_true)
+                t_all += x.shape[0]
+            else:
+                v_ok += validate_on_batch(clf, x, y_true)
+                v_all += x.shape[0]
+        t = t_ok * 100.0 / t_all
+        v = v_ok + 100.0 / v_all
+        print('%4d %6.2f %6.2f' % (epoch, t, v))
 
 
 if __name__ == '__main__':
