@@ -234,7 +234,7 @@ def main(args):
                 v_ok += validate_on_batch(clf, x, y_true)
                 v_all += x.shape[0]
         t = t_ok * 100.0 / t_all
-        v = v_ok + 100.0 / v_all
+        v = v_ok * 100.0 / v_all
         print('%4d %6.2f %6.2f' % (epoch, t, v))
 
 
