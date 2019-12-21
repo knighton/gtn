@@ -10,6 +10,7 @@ def parse_args():
     x = ArgumentParser()
     x.add_argument('--dataset', type=str, default='cifar10@data/')
     x.add_argument('--dl_workers', type=int, default=8)
+    x.add_argument('--epochs', type=int, default=100)
     x.add_argument('--batch_size', type=int, default=256)
     x.add_argument('--tqdm', type=int, default=1)
     return x.parse_args()
@@ -54,7 +55,7 @@ def each_batch(t_loader, v_loader, use_tqdm):
     t = each_split_batch(t_loader)
     v = each_split_batch(v_loader)
     if use_tqdm:
-        splits = tqdm(splits)
+        splits = tqdm(splits, leave=False)
     for is_train in splits:
         if is_train:
             each = t
@@ -68,8 +69,9 @@ def main(args):
     dataset_type, dataset_dir = args.dataset.split('@')
     t_loader, v_loader = load_dataset(dataset_type, dataset_dir, args.batch_size,
                                       args.dl_workers)
-    for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm):
-        pass
+    for epoch in range(args.epochs):
+        for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm):
+            pass
 
 
 if __name__ == '__main__':
