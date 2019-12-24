@@ -98,7 +98,8 @@ class Upsample2d(nn.Module):
         self.mul = mul
 
     def forward(self, x):
-        return F.upsample_bilinear(x, self.mul)
+        return F.interpolate(x, scale_factor=self.mul, mode='bilinear',
+                             align_corners=False)
 
 
 class Generator(nn.Module):
@@ -126,11 +127,9 @@ class Generator(nn.Module):
         )
 
         self.trunk = nn.Sequential(
-            nn.Linear(k * 2, k * 2),
-            nn.BatchNorm1d(k * 2),
+            nn.Linear(k * 2, k * 4),
+            nn.BatchNorm1d(k * 4),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(k * 2, k * 2),
             Reshape(k, 2, 2),
             nn.Conv2d(k, k, 3, 1, 1),
             nn.BatchNorm2d(k),
@@ -148,9 +147,6 @@ class Generator(nn.Module):
             nn.BatchNorm2d(k),
             nn.ReLU(),
             Upsample2d(2),
-            nn.Conv2d(k, k, 3, 1, 1),
-            nn.BatchNorm2d(k),
-            nn.ReLU(),
             nn.Conv2d(k, 3, 3, 1, 1),
             nn.Sigmoid(),
         )
@@ -167,9 +163,6 @@ class Classifier(nn.Sequential):
         k = dim
         super().__init__(
             nn.Conv2d(3, k, 3, 1, 1),
-            nn.BatchNorm2d(k),
-            nn.ReLU(),
-            nn.Conv2d(k, k, 3, 1, 1),
             nn.BatchNorm2d(k),
             nn.ReLU(),
             nn.Conv2d(k, k, 3, 2, 1),
@@ -194,7 +187,8 @@ class Classifier(nn.Sequential):
         )
 
 
-def baseline_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true):
+def baseline_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true,
+                            noise_dim, num_classes):
     clf.train()
     clf.zero_grad()
     y_pred = clf(x)
@@ -210,9 +204,32 @@ def baseline_validate_on_batch(clf, x, y_true):
     return (y_pred.max(1)[1] == y_true).sum().item()
 
 
-def gtn_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true):
+def gtn_train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x, y_true,
+                       noise_dim, num_classes):
+    device = x.device
+    batch_size = x.shape[0]
+
+    gen.train()
     clf.train()
-    # TODO
+
+    gen.zero_grad()
+    clf.zero_grad()
+
+    noise = torch.randn(batch_size, noise_dim, device=device)
+    gen_y_true = torch.randint(0, num_classes, (batch_size,), device=device)
+    gen_x = gen(noise, gen_y_true)
+    y_pred = clf(gen_x)
+    loss = F.cross_entropy(y_pred, gen_y_true)
+    loss.backward()
+
+    y_pred = clf(x)
+    loss = F.cross_entropy(y_pred, y_true)
+    loss.backward()
+
+    gen_optimizer.step()
+    clf_optimizer.step()
+
+    return (y_pred.max(1)[1] == y_true).sum().item()
 
 
 def gtn_validate_on_batch(clf, x, y_true):
@@ -251,7 +268,7 @@ def main(args):
         for is_train, x, y_true in each_batch(t_loader, v_loader, args.tqdm, device):
             if is_train:
                 t_ok += train_on_batch(gen, gen_optimizer, clf, clf_optimizer, x,
-                                       y_true)
+                                       y_true, args.noise_dim, num_classes)
                 t_all += x.shape[0]
             else:
                 v_ok += validate_on_batch(clf, x, y_true)
